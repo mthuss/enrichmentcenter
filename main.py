@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api.routes import enrichment
+from enrichmentcenter.api.routes import enrichment
 
 app = FastAPI()
 

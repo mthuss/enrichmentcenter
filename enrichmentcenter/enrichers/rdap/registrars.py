@@ -34,7 +34,7 @@ def normalize_registrar_name(name: str) -> str:
     return " ".join(tokens)
 
 def _load_registrars():
-    df = pd.read_csv("assets/registrars.csv")
+    df = pd.read_csv("enrichmentcenter/enrichers/rdap/assets/registrars.csv")
     
     df = df[["IANA Number", "Registrar Name", "Country/Territory"]]
     df = df.rename(columns={

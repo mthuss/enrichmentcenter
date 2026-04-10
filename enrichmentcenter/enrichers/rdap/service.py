@@ -1,9 +1,15 @@
-from registrars import normalize_registrar_name, REGISTRARS_BY_ID, REGISTRARS_BY_NAME
+from .registrars import normalize_registrar_name, REGISTRARS_BY_ID, REGISTRARS_BY_NAME
 from datetime import datetime as dt
 import re
 import whoisit
 import whois
 import json
+import asyncio
+
+# Request a domain to be enriched
+async def enrich_domain(domain):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, registrationInfo, domain)
 
 #####################
 ### GATHER DATA ####
