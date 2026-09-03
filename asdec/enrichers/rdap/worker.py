@@ -1,5 +1,5 @@
-from enrichmentcenter.enrichers.base import Enricher
-from enrichmentcenter.core.db import queries
+from asdec.enrichers.base import Enricher
+from asdec.core.db import queries
 from .service import enrich_domain
 import asyncio
 import whoisit

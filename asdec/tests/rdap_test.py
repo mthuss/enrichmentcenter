@@ -1,5 +1,5 @@
 import asyncio
-from enrichmentcenter.enrichers.rdap.service import enrich_domain
+from asdec.enrichers.rdap.service import enrich_domain
 
 async def main():
     domain = "rainyseasons.net"

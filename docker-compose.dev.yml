@@ -1,0 +1,21 @@
+services:
+  database:
+    container_name: "asdec-postgres-dev"
+    image: postgres:latest
+    volumes:
+      - postgres_data_asdec:/var/lib/postgresql
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', "pg_isready -U asdec_user -d asdec-debug"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: 'asdec_user'
+      POSTGRES_PASSWORD: 'e06d8bfca5174428a23b0d3916199ca6'
+      POSTGRES_DB: 'asdec-debug'
+
+volumes:
+  postgres_data_asdec:

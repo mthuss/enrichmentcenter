@@ -184,5 +184,7 @@ def _normalize_status_list(status_list):
 
 def _normalize_date(date):
     if date:
+        if isinstance(date, list):
+            date = date[0]
         return date.strftime("%Y%m%d-%H:%M:%S")
     return None
