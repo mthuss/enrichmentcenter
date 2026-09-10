@@ -5,6 +5,7 @@ import httpx
 import ipaddress
 import tempfile
 import requests
+import validators
 from enum import Enum
 from typing import Sequence
 from fastapi import FastAPI, Request
@@ -21,8 +22,15 @@ class parse_methods(Enum):
     AD_BLOCK_PLUS = "adblock_plus"  # parse like Adblock Plus
     SUBDOMAIN = "subdomain"         # parse like simple, removing '.' on the first character of the line
 
-async def parse_feeds(feed_source: str, feed_parser: str, method = None, csv_col = "None") -> Sequence[str]:
+async def parse_feeds(feed_source: str, feed_parser: str, method = None, csv_col = "None", malicious = True) -> Sequence[str]:
         """Fetch feed data from source and store in database"""
+
+        """Get 10000 benign domains used later for filtering"""
+        response = requests.get("https://raw.githubusercontent.com/MISP/misp-warninglists/refs/heads/main/lists/cloudflare-top10k/list.json")
+        if response.status_code == 200:
+            benign_domains = response.json()['list']
+        else:
+            benign_domains = None
 
         extracted_domains = []  # List of domains names with possible ips
         filtered_domains = []   # List of 100% domains names
@@ -142,11 +150,11 @@ async def parse_feeds(feed_source: str, feed_parser: str, method = None, csv_col
 
             # SIMPLE method selected, parse the file line by line and extract domains that do not start with feed.parser
             elif method == "simple":
-                extracted_domains.extend(
-                    line.strip()
-                    for line in f
-                    if line.strip() and not line.startswith(f"{feed_parser}")
-                )
+                 for line in f:
+                    clean_line = line.split(feed_parser)[0].strip()
+
+                    if clean_line and not clean_line.startswith(feed_parser):
+                        extracted_domains.append(clean_line)
 
             # FULL_URL method selected, parse the file line by line and extract domains from full URLs
             elif method == "full_url":
@@ -217,16 +225,27 @@ async def parse_feeds(feed_source: str, feed_parser: str, method = None, csv_col
 
                     extracted_domains.append(clean_line)
 
+            elif method == "None":
+                for line in f:
+                    clean_line = line.strip()
+                    if len(clean_line) > 0:
+                        extracted_domains.append(clean_line)
+
         print(f"Total domains and possible ips extracted: {len(extracted_domains)}")
 
         """Filter out any extracted domains that are actually IP addresses, keeping only valid domain names"""
         for domain in extracted_domains:
             try:
                 ipaddress.ip_address(domain)
-                print(f"Skipping IP address: {domain}")
+#                print(f"Skipping IP address: {domain}")
                 continue
             except ValueError:
-                filtered_domains.append(domain)
+                if validators.domain(domain):
+                    if malicious:
+                        if domain not in benign_domains:
+                            filtered_domains.append(domain)
+                    else:
+                        filtered_domains.append(domain)
 
         return filtered_domains
 

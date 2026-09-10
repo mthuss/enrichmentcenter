@@ -1,7 +1,8 @@
+import logging
 from typing import Sequence
 import requests
 import csv
-from asdec.enrichers.lists.models import Feed, FeedCreate
+from asdec.enrichers.lists.models import Feed, FeedCreate, DomainCreate
 from asdec.enrichers.lists.repo import ListRepo, DomainRepo
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -12,20 +13,29 @@ from parsero import parse_feeds
 # response format:
 # {"error": bool, "error_msg" (optional): string, "response": string}
 
+logger = logging.getLogger(__name__)
+
 class DomainService:
     def __init__( self, repo: DomainRepo):
         self._repo_ = repo
-    def createDomain(self, domain, malicious):
+    def createDomain(self, row, malicious):
         name = row["name"]
+        return DomainCreate(name=name)
 
     def getDomainsFromFeed(self, feed: Feed):
-        return parse_feeds(feed.url, feed.parse_char, feed.parser, feed.csv_column)
+        return parse_feeds(feed.url, feed.parse_char, feed.parser, feed.csv_column, malicious=feed.malicious)
 
     async def addNewDomains(self, feeds: Sequence[Feed]):
         for feed in feeds:
+            logger.info(f"Adding domains from the {feed.name} feed.")
             domains = await self.getDomainsFromFeed(feed)
-            return domains
-
+            if domains:
+                results = await self._repo_.bulk_create(domains, feed)
+                if len(results) > 0:
+                    logger.info(f"Finished adding domains from the {feed.name} feed.")
+                    
+                print(f"Feed {feed.name} had {len(results)} new domains added to the database!")
+        return "Domains added!"
 
     
 

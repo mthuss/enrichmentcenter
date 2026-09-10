@@ -12,7 +12,6 @@ import asyncio
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = Settings()
-    logging.basicConfig(filename='asdec.log', level=logging.INFO)
     db = Database(settings)
     await db.createTables()
     app.state.db = db
