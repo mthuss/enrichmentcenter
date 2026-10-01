@@ -11,6 +11,7 @@ from typing import Sequence
 from fastapi import FastAPI, Request
 from urllib.parse import urlparse
 from fastapi.responses import FileResponse
+from pathlib import Path
 
 class parse_methods(Enum):
     CSV = "csv"                     # parse like CSV file, 1s column with domains, 1 per line
@@ -232,7 +233,8 @@ async def parse_feeds(feed_source: str, feed_parser: str, method = None, csv_col
                         extracted_domains.append(clean_line)
 
         print(f"Total domains and possible ips extracted: {len(extracted_domains)}")
-
+        
+        Path(temp_file_path).unlink(missing_ok=True)
         """Filter out any extracted domains that are actually IP addresses, keeping only valid domain names"""
         for domain in extracted_domains:
             try:
@@ -242,8 +244,9 @@ async def parse_feeds(feed_source: str, feed_parser: str, method = None, csv_col
             except ValueError:
                 if validators.domain(domain):
                     if malicious:
-                        if domain not in benign_domains:
-                            filtered_domains.append(domain)
+                        if benign_domains != None:
+                            if domain not in benign_domains:
+                                filtered_domains.append(domain)
                     else:
                         filtered_domains.append(domain)
 

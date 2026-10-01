@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-import logging
+import asdec.core.logging
 import uvicorn
 from fastapi import FastAPI
 from asdec.api.routes import enrichment
@@ -9,6 +9,9 @@ from asdec.enrichers.lists.service import ListService
 from asdec.enrichers.lists.repo import ListRepo
 import asyncio
 
+from asdec.enrichment.repo import EnrichmentJobRepo
+from asdec.enrichment.service import EnrichmentService
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = Settings()
@@ -17,6 +20,11 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     async with db.getSession() as session:
         await ListService(ListRepo(session)).populateFeeds()
+        await EnrichmentService(EnrichmentJobRepo(session)).reschedule_broken_jobs_on_startup()
+
+    # add a function to check orphan 
+    # enrichment processes and 
+    # reschedule them here
 
     yield
 

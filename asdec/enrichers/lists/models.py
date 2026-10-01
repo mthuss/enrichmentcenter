@@ -9,11 +9,14 @@ from sqlalchemy import (
     Boolean,
     Date,
     ForeignKey,
-    Integer,
     String,
     UniqueConstraint,
+    Integer
 )
 
+# ------------
+# Feed models
+# ------------
 class Feed(Base):
     __tablename__ = "feeds"
 
@@ -25,8 +28,8 @@ class Feed(Base):
     parse_char: Mapped[str] = mapped_column(String(length=7), nullable=True)
     csv_column: Mapped[str] = mapped_column(String(length=32))
     malicious: Mapped[bool] = mapped_column(Boolean(),nullable=False)
-    creation_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    creation_date: Mapped[Date] = mapped_column(Date(), server_default=func.now())
+    updated_date: Mapped[Date] = mapped_column(Date(), server_default=func.now(), onupdate=func.now())
     entries: Mapped[list["FeedDomain"]] = relationship(
         back_populates="feed",
         cascade="all, delete-orphan",
@@ -44,11 +47,16 @@ class FeedCreate(PydanticBase):
     csv_column: str | None
     malicious: bool
 
+
+# --------------
+# Domain models
+# --------------
 class Domain(Base):
     __tablename__ = "domains"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(length=255), nullable=False, unique=True)
+    enrichment_status: Mapped[int] = mapped_column(Integer(), nullable=False)
     feed_entries: Mapped[list["FeedDomain"]] = relationship(
         back_populates="domain",
         cascade="all, delete-orphan"
@@ -57,6 +65,10 @@ class Domain(Base):
 class DomainCreate(PydanticBase):
     name: str
 
+
+# ------------------------------------------------
+# Relationship between the Feed and Domain models
+# ------------------------------------------------
 class FeedDomain(Base):
     __tablename__ = "rel_feed_domain"
     __table_args__ = (

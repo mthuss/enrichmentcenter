@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from os import path
 from asdec.core.config import Settings
+from asdec.enrichment.service import EnrichmentService
 from parsero import parse_feeds
 
 # response format:
@@ -16,8 +17,9 @@ from parsero import parse_feeds
 logger = logging.getLogger(__name__)
 
 class DomainService:
-    def __init__( self, repo: DomainRepo):
+    def __init__( self, repo: DomainRepo, enrichmentservice: EnrichmentService):
         self._repo_ = repo
+        self._enrichmentservice_ = enrichmentservice
     def createDomain(self, row, malicious):
         name = row["name"]
         return DomainCreate(name=name)
@@ -26,15 +28,25 @@ class DomainService:
         return parse_feeds(feed.url, feed.parse_char, feed.parser, feed.csv_column, malicious=feed.malicious)
 
     async def addNewDomains(self, feeds: Sequence[Feed]):
+        # Go through every feed in the database, 
+        # gather all of their domains and add them
+        # to the database. If the domain is already 
+        # present, update the rel_feed_domain relation's
+        # "updated_date" timestamp
         for feed in feeds:
             logger.info(f"Adding domains from the {feed.name} feed.")
             domains = await self.getDomainsFromFeed(feed)
             if domains:
                 results = await self._repo_.bulk_create(domains, feed)
-                if len(results) > 0:
+                print(f"Domains added: {len(results)}")
+                if len(results) > 0: # this will only work sometimes due to results being dependant on NEW domains, not just successful attempts. Change later
                     logger.info(f"Finished adding domains from the {feed.name} feed.")
+                    domain_ids = [d.id for d in results]
+                    await self._enrichmentservice_.addJobAfterDomainInsert(domain_ids)
+
+            # maybe add an else here
                     
-                print(f"Feed {feed.name} had {len(results)} new domains added to the database!")
+                logger.info(f"Feed {feed.name} had {len(results)} new domains added to the database!")
         return "Domains added!"
 
     
