@@ -25,9 +25,12 @@ class Enricher(ABC):
         """Fetch items to process (from DB)"""
         pass
 
-    @abstractmethod
-    async def process_item(self, item) -> Any:
+    async def async_process_item(self, item) -> Any:
         """Main enrichment logic"""
+        pass
+
+    @abstractmethod 
+    def process_item(self, item) -> Any:
         pass
 
     @abstractmethod
@@ -40,7 +43,7 @@ class Enricher(ABC):
         pass
 
     # --- OPTIONAL HOOKS ---
-    async def handle_error(self, item, error):
+    def handle_error(self, item, error):
         """Override for retries / logging"""
         print(f"[{self.name}] error on {item}: {error}")
 
@@ -52,16 +55,8 @@ class Enricher(ABC):
                 await self.process_item(item)
                 await self.mark_done(item)
             except Exception as e:
-                await self.handle_error(item, e)
+                self.handle_error(item, e)
 
-    async def _run_batch_item(self, item: JobInfo):
-        async with self.sem:
-            try:
-                results = await self.process_item(item)
-                return EnrichmentResults(job_id=item.job.id,domain_id=item.job.domain, results=results, error=None)
-            except EnrichmentException as e:
-                await self.handle_error(item, e)
-                return EnrichmentResults(job_id=item.job.id, domain_id=item.job.domain, results=None, error=e.code)
 
     async def run_once(self):
         batch = await self.fetch_batch()

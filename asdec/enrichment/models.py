@@ -1,3 +1,4 @@
+from asdec.enrichers.rdap.models import RegistrationFeaturesCreate
 from asdec.enrichers.lexical.models import LexicalFeaturesCreate
 from typing import Any
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -9,7 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     func,
-    Enum, Boolean,
+    Enum, Boolean, Index, text,
 )
 
 class EnrichmentType(enum.Enum):
@@ -20,6 +21,11 @@ class EnrichmentType(enum.Enum):
 class EnrichmentError(enum.Enum):
     TIMED_OUT = "timed_out"
     PROCESSING_ERROR = "processing_error"
+    RATE_LIMITED = "rate_limited"
+    NOT_FOUND = "not_found"
+    ERRORED = "errored"
+    INCOMPLETE = "incomplete"
+    UNSUPPORTED = "unsupported"
 
 class EnrichmentStatus(enum.Enum):
     PENDING = 0
@@ -31,10 +37,12 @@ class EnrichmentStatus(enum.Enum):
 class JobInfo:
     job: EnrichmentJob
     domain_name: str
+    extra_data: Any
 
-    def __init__(self, job:EnrichmentJob, domain_name: str):
+    def __init__(self, job:EnrichmentJob, domain_name: str, extra_data = None):
         self.job = job
         self.domain_name = domain_name
+        self.extra_data = extra_data
 
 class EnrichmentException(Exception):
     def __init__(self, code: EnrichmentError):
@@ -44,7 +52,7 @@ class EnrichmentException(Exception):
 class EnrichmentResults:
     job_id: int
     domain_id: int
-    results: LexicalFeaturesCreate
+    results: Any
     error: EnrichmentError | None
 
     def __init__(self, job_id: int, domain_id: int, results: Any, error: EnrichmentError | None):
@@ -75,6 +83,20 @@ class EnrichmentJob(Base):
     )
     next_enrichment: Mapped[Date] = mapped_column(Date(), server_default=func.now(), nullable=True)
     status: Mapped[EnrichmentStatus] = mapped_column(Enum(EnrichmentStatus), nullable=False) 
+
+    __table_args__ = (
+        Index(
+            "idx_enrichment_job_pending",
+            "enrichment_type",
+            "id",
+            postgresql_where=(status == EnrichmentStatus.PENDING),
+        ),
+        Index(
+            "idx_enrichment_job_due",
+            "next_enrichment",
+            postgresql_where=(status == EnrichmentStatus.COMPLETE),
+        ),
+    )
 
 class EnrichmentJobCreate(PydanticBase):
     domain: int

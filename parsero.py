@@ -47,18 +47,21 @@ async def parse_feeds(feed_source: str, feed_parser: str, method = None, csv_col
             print(f"Fetching data from source: {feed_source} using parser: {feed_parser}")
             
             try:
-                response = requests.get(feed_source, timeout=10)
+                response = await client.get(feed_source, timeout=10)
                 response.raise_for_status()
 
                 with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
                     temp_file_path = f.name
                     f.write(response.content)
 
-            except requests.exceptions.HTTPError as e:
+            except httpx.HTTPStatusError as e:
                 print(f"Error HTTP {e.response.status_code} while downloading feed: {feed_source}: {e}")
                 return []
-            except requests.exceptions.RequestException as e:
+            except httpx.RequestError as e:
                 print(f"Network or request error occurred while downloading feed: {feed_source}: {e}")
+                return []
+            except TimeoutError as e:
+                print(f"Timeout error occurred {feed_source}: {e}")
                 return []
             except Exception as e:
                 print(f"Unexpected error occurred while processing feed: {feed_source}: {e}")

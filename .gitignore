@@ -6,6 +6,8 @@ dist/
 wheels/
 *.egg-info
 db/
+asdec.log
+001-snapshot.sql
 
 # Virtual environments
 .venv

@@ -30,10 +30,6 @@ class EnrichmentService:
         job_ids = [j.id for j in jobs ]
         return await self._repo_.change_job_status(job_ids, new_status, new_date=new_date)
 
-    async def get_domains_from_jobs(self, jobs: Sequence[EnrichmentJob]):
-        domain_ids = [i.domain for i in jobs]
-
-
     # update succesful jobs with the COMPLETE EnrichmentStatus and schedule 
     # the next enrichment
     async def mark_done_batch(self, job_ids: Sequence[int], enrichment_type: EnrichmentType):

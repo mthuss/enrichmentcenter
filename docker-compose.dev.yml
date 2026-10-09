@@ -4,7 +4,7 @@ services:
     image: postgres:latest
     volumes:
       - postgres_data_asdec:/var/lib/postgresql
-      - ./db:/docker-entrypoint-initdb.d
+#      - ./db:/docker-entrypoint-initdb.d/:ro
     restart: unless-stopped
     healthcheck:
       test: ['CMD-SHELL', "pg_isready -U asdec_user -d asdec-debug"]

@@ -1,3 +1,5 @@
+from asdec.enrichers.rdap.worker import RDAPEnricher
+from asdec.enrichers.rdap.service import RDAPService
 from asdec.enrichers.lexical.service import LexicalService
 from asdec.enrichers.lexical.repo import LexicalRepo
 from asdec.enrichers.lexical.worker import LexicalEnricher
@@ -34,9 +36,10 @@ def get_enrichment_service(enrichmentjob_repo: EnrichmentJobRepo = Depends(get_e
 
 def get_domain_service(
     domain_repo: DomainRepo = Depends(get_domain_repository),
-    enrichment_service: EnrichmentService = Depends(get_enrichment_service)
+    enrichment_service: EnrichmentService = Depends(get_enrichment_service),
+    db = Depends(get_db)
 ) -> DomainService:
-    return DomainService(domain_repo, enrichment_service)
+    return DomainService(domain_repo, enrichment_service, db)
 
 def get_lexical_service(repo: LexicalRepo = Depends(get_lexical_repository)):
     return LexicalService(repo)
@@ -49,5 +52,11 @@ def get_list_service(
 ) -> ListService:
     return ListService(list_repo)
 
-def get_lexical_enricher(_lexical_service: LexicalService = Depends(get_lexical_service), _job_service: EnrichmentService = Depends(get_enrichment_service)):
-    return LexicalEnricher(_lexical_service, _job_service)
+def get_lexical_enricher(_lexical_service: LexicalService = Depends(get_lexical_service), _job_service: EnrichmentService = Depends(get_enrichment_service), db: Database = Depends(get_db)):
+    return LexicalEnricher(_lexical_service, _job_service, db)
+
+def get_rdap_service(db: Database = Depends(get_db)):
+    return RDAPService(db)
+
+def get_rdap_enricher(db: Database = Depends(get_db)):
+    return RDAPEnricher(db)

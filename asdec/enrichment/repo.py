@@ -15,31 +15,23 @@ class EnrichmentJobRepo:
         self._session_ = session
 
     async def bulk_create(self, jobs, batch_size: int):
-        added = []
+        rowcount = 0
         for chunk in batched(jobs, batch_size):
-            stmt = (insert(EnrichmentJob).values(chunk).on_conflict_do_nothing().returning(EnrichmentJob))
+            stmt = (insert(EnrichmentJob).values(chunk).on_conflict_do_nothing())
             result = await self._session_.execute(stmt)
-            added.extend(result.scalars().all())
+            rowcount += result.rowcount
         
         await self._session_.commit()
         
-        return added
+        return rowcount
 
     async def claim_batch(self, enrichment_type: EnrichmentType, batch_size: int):
         # get <batch_size> pending jobs
         subquery = (
             select(EnrichmentJob.id)
             .where(
-                and_(
-                    EnrichmentJob.enrichment_type == enrichment_type,
-                    or_(
-                    EnrichmentJob.status == EnrichmentStatus.PENDING,
-                        and_(
-                            EnrichmentJob.next_enrichment != None,
-                            EnrichmentJob.next_enrichment <= func.now()
-                        )
-                    )
-                )
+                EnrichmentJob.enrichment_type == enrichment_type,
+                EnrichmentJob.status == EnrichmentStatus.PENDING,
             )
             .order_by(EnrichmentJob.id)
             .limit(batch_size)
@@ -61,16 +53,19 @@ class EnrichmentJobRepo:
 
         # get domains associated with the jobs:
         domain_ids = [job.domain for job in jobs]
-        domain_stmt = (
-            select(Domain.id, Domain.name)
-            .where(Domain.id.in_(domain_ids))
-        )
 
-        result = await self._session_.execute(domain_stmt)
-        domains = {
-            domain_id: name
-            for domain_id, name in result.all()
-        }
+        domains = {}
+        for batch in batched(domain_ids, 32000):
+            domain_stmt = (
+                select(Domain.id, Domain.name)
+                .where(Domain.id.in_(batch))
+            )
+
+            result = await self._session_.execute(domain_stmt)
+            domains.update({
+                domain_id: name
+                for domain_id, name in result.all()
+            })
 
         await self._session_.commit()
 
@@ -144,17 +139,21 @@ class EnrichmentJobRepo:
 
 
     async def mark_done_batch(self, job_ids, enrichment_interval):
-        stmt = (
-            update(EnrichmentJob)
-            .where(EnrichmentJob.id.in_(job_ids))
-            .values(
-                status=EnrichmentStatus.COMPLETE,
-                next_enrichment=(func.now() + timedelta(days=enrichment_interval)) if enrichment_interval else None
+        for batch in batched(job_ids,16384):
+            stmt = (
+                update(EnrichmentJob)
+                .where(EnrichmentJob.id.in_(batch))
+                .values(
+                    status=EnrichmentStatus.COMPLETE,
+                    next_enrichment=(func.now() + timedelta(days=enrichment_interval)) if enrichment_interval else None
+                )
             )
-        )
-        await self._session_.execute(stmt)
+            logger.info("[erichment mark_done] Before execution")
+            await self._session_.execute(stmt)
+            logger.info("[erichment mark_done] After execution, before commit")
 
         await self._session_.commit()
+        logger.info("[erichment mark_done] After commit")
 
 #    async def schedule_enrichment(self, job_ids, next_enrichment_dates):
 #        for batch in job_ids:

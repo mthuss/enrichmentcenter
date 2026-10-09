@@ -12,8 +12,11 @@ class Database():
         self.engine = create_async_engine( # colocar infos do engine escolhido aqui
             f"{settings.DB_DRIVER}://{settings.DB_USER}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}",
             echo=False,
-            hide_parameters=True
-        )
+            hide_parameters=True,
+            pool_size=16, 
+            max_overflow=32
+    )
+
 
         # realmente inicia a sessão
         self.sessionMaker = async_sessionmaker(
