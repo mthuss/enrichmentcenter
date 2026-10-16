@@ -14,7 +14,7 @@ async def start_enrichment(
     service: DomainService = Depends(get_domain_service)
 ):
     feeds = await repo.getAllFeeds()
-    return await service.addNewDomains(feeds)
+    await service.addNewDomains(feeds)
     
 @router.get("/lexical_enrich")
 async def lexical_enrich(worker: LexicalEnricher = Depends(get_lexical_enricher)):

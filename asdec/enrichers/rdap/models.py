@@ -11,8 +11,10 @@ class RegistrationFeatures(Base):
         ForeignKey("domains.id"),
         primary_key=True
     )
-
-    registrar_handle: Mapped[int] = mapped_column(Integer(), nullable=True)
+    
+    # TODO: add lifetime = registration_date - today as a feature and maybe others
+    available: Mapped[Boolean] = mapped_column(Boolean(), nullable=False)
+    registrar_handle: Mapped[str] = mapped_column(String(length=16), nullable=True)
     registrar_name: Mapped[String] = mapped_column(String(length=256), nullable=True)
     registration_date: Mapped[Date] = mapped_column(Date(), nullable=True)
     last_updated: Mapped[Date] = mapped_column(Date(), nullable=True)
@@ -23,6 +25,7 @@ class RegistrationFeatures(Base):
         back_populates="registration",
         cascade="all, delete-orphan",
     )
+    all_features: Mapped[Boolean] = mapped_column(Boolean(), nullable=False)
 
 class RegistrationStatusFlags(Base):
     __tablename__ = "registration_statusflags"
@@ -47,6 +50,7 @@ class RegistrationStatusFlagsCreate(PydanticBase):
 
 class RegistrationFeaturesCreate(PydanticBase):
     domain_id: int
+    available: bool
     registrar_handle: str | None
     registrar_name: str | None
     registration_date: date | None
@@ -55,3 +59,4 @@ class RegistrationFeaturesCreate(PydanticBase):
     registrar_country: str | None
     dnssec: bool | None
     status_flags: list[RegistrationStatusFlagsCreate] | None
+    all_features: bool

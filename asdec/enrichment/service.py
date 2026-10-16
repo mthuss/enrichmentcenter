@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 import logging
 from sqlalchemy import update, func
 from typing import Sequence
@@ -26,8 +27,9 @@ class EnrichmentService:
     async def get_jobs_by_status(self, enrichment_status: EnrichmentStatus, enrichment_type: EnrichmentType | None = None, batch_size = 16384):
         return await self._repo_.get_jobs_by_status(enrichment_status, enrichment_type, batch_size)
 
-    async def change_job_status(self, jobs: Sequence[EnrichmentJob], new_status: EnrichmentStatus, new_date=None):
-        job_ids = [j.id for j in jobs ]
+    async def change_job_status(self, job_ids: Sequence[int], new_status: EnrichmentStatus, enrichment_type: EnrichmentType):
+        enrichment_period = ENRICHMENT_INTERVALS[enrichment_type]
+        new_date = date.today() + timedelta(days=enrichment_period)
         return await self._repo_.change_job_status(job_ids, new_status, new_date=new_date)
 
     # update succesful jobs with the COMPLETE EnrichmentStatus and schedule 
@@ -56,21 +58,21 @@ class EnrichmentService:
     # it also isn't actually running.
     # As such, this function runs at startup to identify
     # such tasks and reschedule them.
-    async def terrible_nogood_version_of_reschedule_broken_jobs_on_startup(self):
-        changed = []
-        for etype in EnrichmentType:
-            while True:
-                jobs = await self.get_jobs_by_status(EnrichmentStatus.IN_PROGRESS, etype, 16384)
-
-                if not jobs:
-                    break
-
-                results = await self.change_job_status(jobs, EnrichmentStatus.PENDING, new_date=func.now())
-                changed.extend(results)
-
-        logger.info(f"{len(changed)} broken jobs rescheduled.")
-        return f"{len(changed)} jobs rescheduled."
-
+    # async def terrible_nogood_version_of_reschedule_broken_jobs_on_startup(self):
+    #     changed = []
+    #     for etype in EnrichmentType:
+    #         while True:
+    #             jobs = await self.get_jobs_by_status(EnrichmentStatus.IN_PROGRESS, etype, 16384)
+    #
+    #             if not jobs:
+    #                 break
+    #
+    #             results = await self.change_job_status(jobs, EnrichmentStatus.PENDING, new_date=func.now())
+    #             changed.extend(results)
+    #
+    #     logger.info(f"{len(changed)} broken jobs rescheduled.")
+    #     return f"{len(changed)} jobs rescheduled."
+    #
     async def reschedule_broken_jobs_on_startup(self):
         logger.info("Rescheduling broken jobs.")
         changed = await self._repo_.reschedule_broken_jobs()

@@ -1,10 +1,12 @@
-from asyncwhois.errors import NotFoundError
+import logging
+
+from asyncwhois.errors import NotFoundError, QueryError
 import tldextract
 from itertools import zip_longest
 from collections import defaultdict
 from typing import Sequence
 
-from whoisit.errors import ParseError, QueryError, RateLimitedError, RemoteServerError, ResourceAccessDeniedError, ResourceDoesNotExist, UnsupportedError, WhoisItError
+from whoisit.errors import ParseError, RateLimitedError, RemoteServerError, ResourceAccessDeniedError, ResourceDoesNotExist, UnsupportedError, WhoisItError
 from asdec.enrichers.rdap.repo import RDAPRepo
 from asdec.core.db import Database
 from asdec.enrichers.base import Enricher
@@ -17,6 +19,8 @@ import whoisit
 import asyncwhois
 import json
 import asyncio
+import country_converter as coco
+logger = logging.getLogger(__name__)
 
 class RDAPService:
     def __init__(self, db: Database):
@@ -33,20 +37,18 @@ class RDAPService:
     def enrich_batch(self):
         pass
 
-    async def test(self, domain):
-        return await self.registration_info(domain)
+    # async def test(self, domain):
+        # return await self.registration_info(domain)
 
     async def enrich_domain(self, job_info: JobInfo):
+        info = {}
         try:
-            info = await self.registration_info(job_info.domain_name)
-        except RateLimitedError: #429
-            raise EnrichmentException(EnrichmentError.RATE_LIMITED)
-        except ResourceDoesNotExist: #404
-            raise EnrichmentException(EnrichmentError.NOT_FOUND)
-        except RemoteServerError: #500
-            raise EnrichmentException(EnrichmentError.PROCESSING_ERROR)
-        except WhoisItError, QueryError, UnsupportedError, ParseError, ResourceAccessDeniedError:
-            raise EnrichmentException(EnrichmentError.ERRORED)
+            info = await self.registration_info(job_info.domain_name, job_info.extra_data["rdap_supported"])
+        except EnrichmentException as e:
+            if e.code == EnrichmentError.NOT_FOUND:
+                return RegistrationFeaturesCreate(domain_id=job_info.job.domain,available=False,registrar_handle=None,registrar_name=None,registration_date=None,last_updated=None,expiration_date=None,registrar_country=None,dnssec=None,status_flags=None,all_features=False)
+            else:
+                raise e
         
         if not info:
             return None
@@ -55,8 +57,12 @@ class RDAPService:
             flags = [ RegistrationStatusFlagsCreate(domain=job_info.job.domain, flag=f) for f in info["status_flags"] ]
         else:
             flags = None
+
+        all_features = all(v is not None for v in info.values())
+
         return RegistrationFeaturesCreate(
             domain_id=job_info.job.domain, 
+            available=True,
             registrar_handle=info["registrar_handle"],
             registrar_name=info["registrar_name"],
             registration_date=info["registration_date"],
@@ -64,7 +70,8 @@ class RDAPService:
             expiration_date=info["expiration_date"],
             registrar_country=info["registrar_country"],
             dnssec=info["dnssec"],
-            status_flags=flags
+            status_flags=flags,
+            all_features=all_features
         )
 
     async def add_batch_to_db(self, results: Sequence[EnrichmentResults]):
@@ -83,6 +90,7 @@ class RDAPService:
 
         for job in jobs:
             server = self.get_rdap_server(job.domain_name)
+            job.extra_data["rdap_supported"] = False if server == ("unknown",) else True
             groups[server].append(job)
 
         for key in groups.keys():
@@ -102,40 +110,72 @@ class RDAPService:
     #####################
     ### GATHER DATA ####
     ###################
-    async def registration_info(self, domain):
+    async def registration_info(self, domain, rdap_supported = True):
+        # if get_rdap_server(domain) == ""
         exceptions = dict()
-        try:
-            # try retrieving RDAP info
-            rdap_info = await self._from_rdap(domain)
-            # Early exit if RDAP already complete
-            if rdap_info and all(v is not None for v in rdap_info.values()):
-                return rdap_info
-        except Exception as e:
-            exceptions["rdap"] = e
+        # If the domain has a TLD that supports RDAP queries:
+        if rdap_supported:
+            try:
+                # try retrieving RDAP info
+                rdap_info = await self._from_rdap(domain)
+                # Early exit if RDAP already complete
+                if rdap_info and all(v is not None for v in rdap_info.values()):
+                    return rdap_info
+            except Exception as e:
+                logger.info(f"[{type(e)}] RDAP Exception has occured for {domain}!!!! Exception: {e}")
+                exceptions["rdap"] = e
+                rdap_info = {}
+            logger.info(f"Falling back to whois for {domain}")
+        else:
             rdap_info = {}
 
         # Get whois info as fallback if any fields missing
         try:
             whois_info = await self._from_whois(domain)
         except Exception as e:
+            logger.info(f"[{type(e)}] WHOIS Exception has occured for {domain}!!!! Exception: {e}")
             exceptions["whois"] = e
             whois_info = {}
 
-        if not rdap_info and not whois_info:
-            if isinstance(exceptions["rdap"], RateLimitedError) or isinstance(exceptions["whois"], QueryError):
+        # TODO: handle <socket.gaierror> exceptions for WHOIS
+        # In case the domain had no supported RDAP server and whois did not return anything:
+        if not rdap_supported and not whois_info:
+            if isinstance(exceptions["whois"], TimeoutError):
                 raise EnrichmentException(EnrichmentError.TIMED_OUT)
+            if isinstance(exceptions["whois"], NotFoundError):
+                raise EnrichmentException(EnrichmentError.NOT_FOUND)
+            raise EnrichmentException(EnrichmentError.ERRORED)
+            
+
+        # If both RDAP and WHOIS threw exceptions, then we need to pass that to the function that called this one.
+        # Here, we assess what happened and convert it to the EnrichmentError type for ease of use.
+        if rdap_supported and not rdap_info and not whois_info:
+            logger.info(f"No RDAP or WHOIS data for {domain}!!!!")
+            # If it was reported as not existing in RDAP and the WHOIS server timed out, there's a good chance
+            # the WHOIS server has been deprecated and, as such, is no longer responding. Treat this as a NOT_FOUND.
+            if isinstance(exceptions["rdap"], ResourceDoesNotExist) and isinstance(exceptions["whois"], TimeoutError):
+                raise EnrichmentException(EnrichmentError.NOT_FOUND)
+            if isinstance(exceptions["rdap"], RateLimitedError) and (isinstance(exceptions["whois"], QueryError) or isinstance(exceptions["whois"], TimeoutError)):
+                raise EnrichmentException(EnrichmentError.RATE_LIMITED)
+            # One of them timed out, meaning the resource _could_ be available and warrants trying again.
+            if isinstance(exceptions["rdap"], RateLimitedError) or isinstance(exceptions["whois"], QueryError) or isinstance(exceptions["whois"], TimeoutError):
+                raise EnrichmentException(EnrichmentError.TIMED_OUT)
+            # If both responses indicate that the resource does not exist, it... well... doesn't exist...
             if isinstance(exceptions["rdap"], ResourceDoesNotExist) and isinstance(exceptions["whois"], NotFoundError):
                 raise EnrichmentException(EnrichmentError.NOT_FOUND)
+            # Only RDAP raises this error, but it indicates that the TLD is not supported (.jp, for example).
+            # Though the same TLD might be supported in WHOIS, if it fell here, then it means the above
+            # exceptions didn't catch it and it likely is, indeed, unsupported.
             if isinstance(exceptions["rdap"], UnsupportedError):
                 raise EnrichmentException(EnrichmentError.UNSUPPORTED)
-            else:
-                raise EnrichmentException(EnrichmentError.ERRORED)
+            # Generic error for when I don't know what to do with the domain lol
+            raise EnrichmentException(EnrichmentError.ERRORED)
 
         return self._merge_prefer_primary(rdap_info, whois_info)
 
     # try to get registration data from RDAP
     async def _from_rdap(self, domain):
-        rdap_info = await whoisit.domain_async(domain)
+        rdap_info = await whoisit.domain_async(domain, follow_related=False)
             # rdap_info = rdap_with_control(domain)
             # print(json.dumps(rdap_info, indent=4, default=str))
         registrar_handle = self._get_registrar(rdap_info, "rdap")
@@ -155,6 +195,8 @@ class RDAPService:
         _, whois_info = await asyncwhois.aio_whois(domain)
             # print(json.dumps(whois_info, indent=4, default=str))
         registrar_handle = self._get_registrar(whois_info, "whois")
+        if isinstance(registrar_handle, str) and len(registrar_handle) >= 16:
+            registrar_handle = registrar_handle[:16]
         return {
             "registrar_handle": registrar_handle,
             "registrar_name": self._get_registrar_name_from_handle(registrar_handle),
@@ -224,7 +266,7 @@ class RDAPService:
                 if address:
                     country = address.get("country")
                     if country:
-                        return country
+                        return coco.convert(names=[country], to="ISO2", not_found=None)
                 # if it doesn't, try retrieving a handle and reference ICANN list
                 else:
                     iana_id = registrar[0].get("handle")
@@ -236,7 +278,7 @@ class RDAPService:
             # get directly from the "country" record
             country = info.get("country")
             if country:
-                return country
+                return coco.convert(names=[country], to="ISO2", not_found=None)
 
             # try retrieving based on the registrar name
             reg_name = info.get("registrar")
@@ -282,5 +324,5 @@ class RDAPService:
         if date:
             if isinstance(date, list):
                 date = date[0]
-            return date.strftime("%Y%m%d-%H:%M:%S")
+            return date.strftime("%Y-%m-%d")
         return None

@@ -33,6 +33,7 @@ class EnrichmentStatus(enum.Enum):
     IN_PROGRESS = 2
     TIMED_OUT = 3
     ERRORED = 4
+    RATE_LIMITED = 5
 
 class JobInfo:
     job: EnrichmentJob
@@ -54,17 +55,25 @@ class EnrichmentResults:
     domain_id: int
     results: Any
     error: EnrichmentError | None
+    extra_data: Any
 
-    def __init__(self, job_id: int, domain_id: int, results: Any, error: EnrichmentError | None):
+    def __init__(self, job_id: int, domain_id: int, results: Any, error: EnrichmentError | None, extra_data: Any = None):
         self.job_id = job_id
         self.domain_id = domain_id
         self.results = results
         self.error = error
+        self.extra_data = extra_data
 
 ENRICHMENT_INTERVALS = {
     EnrichmentType.LEXICAL: None,
-    EnrichmentType.RDAP: 7,
+    EnrichmentType.RDAP: 14,
     EnrichmentType.PDNS: 1,
+}
+
+ENRICHMENT_ERROR_TO_STATUS = {
+    EnrichmentError.TIMED_OUT: EnrichmentStatus.TIMED_OUT,
+    EnrichmentError.RATE_LIMITED: EnrichmentStatus.RATE_LIMITED,
+    EnrichmentError.ERRORED: EnrichmentStatus.ERRORED,
 }
 
 # -----------------------------------
