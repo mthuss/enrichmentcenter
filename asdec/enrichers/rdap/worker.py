@@ -39,6 +39,9 @@ class RDAPEnricher(Enricher):
         async with self.semaphore:
             return await self._rdap_service.enrich_domain(item)
 
+    # TODO: right now, only one domain_id is associated with the registration data,
+    # so although multiple domains are being covered, their relationship with 
+    # registration data is being lost... Need to fix this.
     async def persist_batch(self, successful: Sequence[EnrichmentResults], errors: Sequence[EnrichmentResults]):
         # TODO: perhaps replace the "equivalent_jobs" approach by just selecting and marking every single
         # domain that is a subdomain of the queried domain at the mark_done() step.
@@ -151,8 +154,6 @@ class RDAPEnricher(Enricher):
                    successful.append(res)
 
             await self.persist_batch(successful, errors)
-            if batch_counter > 1:
-                break
             batch_counter += 1
         elapsed = time.perf_counter() - start
         logger.info(f"Enriched {total_domains} domains in {elapsed:.2f} seconds.")

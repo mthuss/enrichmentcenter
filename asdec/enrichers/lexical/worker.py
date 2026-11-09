@@ -103,8 +103,10 @@ class LexicalEnricher(Enricher):
 
     async def run_until_empty(self):
         batch_counter = 1
+        total_domains = 0
         print(f"[{self.name}] worker started")
 
+        start = time.perf_counter()
         while True:
             batch: Sequence[JobInfo] = await self.fetch_batch()
 
@@ -119,6 +121,7 @@ class LexicalEnricher(Enricher):
             logger.info(f"[Batch {batch_counter}] Fetched a batch of {len(batch)} domains.")
             results = [self._run_batch_item(item) for item in batch]
             logger.info(f"[Batch {batch_counter}] Finished processing batch.")
+            total_domains+=len(results)
             #results = await asyncio.gather(*tasks)
             for res in results:
                 if res.error:
@@ -130,6 +133,8 @@ class LexicalEnricher(Enricher):
             logger.info(f"[Batch {batch_counter}] {len(successful)}/{len(batch)} domains enriched succesfully. {len(errors)} errors.")
             batch_counter += 1
 
+        elapsed = time.perf_counter() - start
+        logger.info(f"Enriched {total_domains} domains in {elapsed:.2f} seconds.")
         print(f"[{self.name}] no pending jobs")
         return "All pending jobs completed"
 

@@ -39,9 +39,10 @@ async def parse_feeds(feed_source: str, feed_parser: str, method = None, csv_col
 
         """header to mimic a real browser request to avoid being blocked by some servers (still being blocked by some servers)"""
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0"
         }
 
+        # TODO: add error handling and retries with asyncio.sleep()
         """Fetch the feed data from the source URL using requests"""
         async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
             print(f"Fetching data from source: {feed_source} using parser: {feed_parser}")

@@ -74,6 +74,7 @@ ENRICHMENT_ERROR_TO_STATUS = {
     EnrichmentError.TIMED_OUT: EnrichmentStatus.TIMED_OUT,
     EnrichmentError.RATE_LIMITED: EnrichmentStatus.RATE_LIMITED,
     EnrichmentError.ERRORED: EnrichmentStatus.ERRORED,
+    EnrichmentError.UNSUPPORTED: EnrichmentStatus.ERRORED,
 }
 
 # -----------------------------------

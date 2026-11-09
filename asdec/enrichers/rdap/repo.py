@@ -12,8 +12,6 @@ class RDAPRepo:
         self._session = session
 
     async def bulk_create(self, features: Sequence[RegistrationFeaturesCreate], batch_size: int):
-        # TODO: need to also mark the domains and jobs contained in
-        # job.extra_data.other_ids as complete
         values = [f.model_dump() for f in features]
         statusflags = []
         for v in values:

@@ -1,0 +1,2 @@
+name,source,parser,parse_method,csv_column
+Majestic_Million,https://downloads.majestic.com/majestic_million.csv,#,csv,Domain

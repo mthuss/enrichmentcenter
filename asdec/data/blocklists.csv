@@ -1,5 +1,4 @@
 name,source,parser,abuse_type,parse_method,csv_column
-Maltrail_Malware_Domains,https://github.com/stamparm/trails/releases/latest/download/maltrail-malware-domains.txt,#,malware,simple,None
 DNSBunker-Phishing,https://codeberg.org/xRuffKez/DNSBunker_DNSBL/raw/branch/main/06_phish.txt,#,phishing,None,None
 DNSBunker-Fake,https://codeberg.org/xRuffKez/DNSBunker_DNSBL/raw/branch/main/04_fake.txt,#,phishing,None,None
 DNSBunker-Scam,https://codeberg.org/xRuffKez/DNSBunker_DNSBL/raw/branch/main/03_scam.txt,#,phishing,None,None
@@ -8,3 +7,7 @@ Antispam-It,https://raw.githubusercontent.com/marco-acorte/antispam-it/main/anti
 Spam_List-1,https://raw.githubusercontent.com/ThioJoe/YT-Spam-Lists/refs/heads/main/SpamDomainsList.txt,#,spam,simple,None
 Stop_Forum_Spam,https://www.stopforumspam.com/downloads/toxic_domains_whole_filtered.txt,#,spam,None,None
 Spam_List-2,https://raw.githubusercontent.com/Entree3k/Pi-hole-Block-List/refs/heads/master/Spam%20List,#,spam,None,None
+Spyware_Filters,https://raw.githubusercontent.com/AdguardTeam/AdguardFilters/master/SpywareFilter/sections/mobile.txt,#,malware,adguard,None
+Stalkerware_Indicators-1,https://raw.githubusercontent.com/AssoEchap/stalkerware-indicators/master/generated/hosts,#,malware,None,None
+Stalkerware_Indicators-2,https://raw.githubusercontent.com/AssoEchap/stalkerware-indicators/master/generated/quad9_blocklist.txt,#,malware,None,None
+Anti-Malware_Domains-1,https://raw.githubusercontent.com/DandelionSprout/adfilt/refs/heads/master/Alternate%20versions%20Anti-Malware%20List/AntiMalwareDomains.txt,#,malware,simple,None

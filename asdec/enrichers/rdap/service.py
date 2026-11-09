@@ -13,13 +13,14 @@ from asdec.enrichers.base import Enricher
 from asdec.enrichers.rdap.models import RegistrationFeaturesCreate, RegistrationStatusFlagsCreate
 from asdec.enrichment.models import EnrichmentError, EnrichmentException, EnrichmentResults, JobInfo
 from .registrars import normalize_registrar_name, _load_registrars
-from datetime import datetime as dt
+from datetime import datetime as dt, timedelta, UTC
 import re
 import whoisit
 import asyncwhois
 import json
 import asyncio
 import country_converter as coco
+import socket
 logger = logging.getLogger(__name__)
 
 class RDAPService:
@@ -45,8 +46,8 @@ class RDAPService:
         try:
             info = await self.registration_info(job_info.domain_name, job_info.extra_data["rdap_supported"])
         except EnrichmentException as e:
-            if e.code == EnrichmentError.NOT_FOUND:
-                return RegistrationFeaturesCreate(domain_id=job_info.job.domain,available=False,registrar_handle=None,registrar_name=None,registration_date=None,last_updated=None,expiration_date=None,registrar_country=None,dnssec=None,status_flags=None,all_features=False)
+            if e.code == EnrichmentError.NOT_FOUND or e.code == EnrichmentError.UNSUPPORTED:
+                return RegistrationFeaturesCreate(domain_id=job_info.job.domain,available=False,registrar_handle=None,registrar_name=None,registration_date=None,last_updated=None,expiration_date=None,age_days=None,registrar_country=None,dnssec=None,status_flags=None,all_features=False)
             else:
                 raise e
         
@@ -68,6 +69,7 @@ class RDAPService:
             registration_date=info["registration_date"],
             last_updated=info["last_updated"],
             expiration_date=info["expiration_date"],
+            age_days=info["age_days"],
             registrar_country=info["registrar_country"],
             dnssec=info["dnssec"],
             status_flags=flags,
@@ -122,7 +124,7 @@ class RDAPService:
                 if rdap_info and all(v is not None for v in rdap_info.values()):
                     return rdap_info
             except Exception as e:
-                logger.info(f"[{type(e)}] RDAP Exception has occured for {domain}!!!! Exception: {e}")
+                # logger.info(f"[{type(e)}] RDAP Exception has occurred for {domain}!!!! Exception: {e}")
                 exceptions["rdap"] = e
                 rdap_info = {}
             logger.info(f"Falling back to whois for {domain}")
@@ -133,16 +135,20 @@ class RDAPService:
         try:
             whois_info = await self._from_whois(domain)
         except Exception as e:
-            logger.info(f"[{type(e)}] WHOIS Exception has occured for {domain}!!!! Exception: {e}")
+            # logger.info(f"[{type(e)}] WHOIS Exception has occurred for {domain}!!!! Exception: {e}")
             exceptions["whois"] = e
             whois_info = {}
 
-        # TODO: handle <socket.gaierror> exceptions for WHOIS
+        # REVISE: handle <socket.gaierror> exceptions for WHOIS
         # In case the domain had no supported RDAP server and whois did not return anything:
         if not rdap_supported and not whois_info:
             if isinstance(exceptions["whois"], TimeoutError):
                 raise EnrichmentException(EnrichmentError.TIMED_OUT)
             if isinstance(exceptions["whois"], NotFoundError):
+                raise EnrichmentException(EnrichmentError.NOT_FOUND)
+            # this is an error when the getaddrinfo function gets an invalid hostname
+            # I think we can assume this means it's not found?
+            if isinstance(exceptions["whois"], socket.gaierror):
                 raise EnrichmentException(EnrichmentError.NOT_FOUND)
             raise EnrichmentException(EnrichmentError.ERRORED)
             
@@ -153,12 +159,12 @@ class RDAPService:
             logger.info(f"No RDAP or WHOIS data for {domain}!!!!")
             # If it was reported as not existing in RDAP and the WHOIS server timed out, there's a good chance
             # the WHOIS server has been deprecated and, as such, is no longer responding. Treat this as a NOT_FOUND.
-            if isinstance(exceptions["rdap"], ResourceDoesNotExist) and isinstance(exceptions["whois"], TimeoutError):
+            if isinstance(exceptions["rdap"], ResourceDoesNotExist) and isinstance(exceptions["whois"], (TimeoutError, socket.gaierror)):
                 raise EnrichmentException(EnrichmentError.NOT_FOUND)
-            if isinstance(exceptions["rdap"], RateLimitedError) and (isinstance(exceptions["whois"], QueryError) or isinstance(exceptions["whois"], TimeoutError)):
+            if isinstance(exceptions["rdap"], RateLimitedError) and (isinstance(exceptions["whois"], (QueryError,TimeoutError, socket.gaierror))):
                 raise EnrichmentException(EnrichmentError.RATE_LIMITED)
             # One of them timed out, meaning the resource _could_ be available and warrants trying again.
-            if isinstance(exceptions["rdap"], RateLimitedError) or isinstance(exceptions["whois"], QueryError) or isinstance(exceptions["whois"], TimeoutError):
+            if isinstance(exceptions["rdap"], RateLimitedError) or isinstance(exceptions["whois"], (QueryError, TimeoutError, socket.gaierror)):
                 raise EnrichmentException(EnrichmentError.TIMED_OUT)
             # If both responses indicate that the resource does not exist, it... well... doesn't exist...
             if isinstance(exceptions["rdap"], ResourceDoesNotExist) and isinstance(exceptions["whois"], NotFoundError):
@@ -166,7 +172,7 @@ class RDAPService:
             # Only RDAP raises this error, but it indicates that the TLD is not supported (.jp, for example).
             # Though the same TLD might be supported in WHOIS, if it fell here, then it means the above
             # exceptions didn't catch it and it likely is, indeed, unsupported.
-            if isinstance(exceptions["rdap"], UnsupportedError):
+            if isinstance(exceptions["rdap"], UnsupportedError) and not isinstance(exceptions["whois"], TimeoutError):
                 raise EnrichmentException(EnrichmentError.UNSUPPORTED)
             # Generic error for when I don't know what to do with the domain lol
             raise EnrichmentException(EnrichmentError.ERRORED)
@@ -179,12 +185,16 @@ class RDAPService:
             # rdap_info = rdap_with_control(domain)
             # print(json.dumps(rdap_info, indent=4, default=str))
         registrar_handle = self._get_registrar(rdap_info, "rdap")
+
+        if isinstance(registrar_handle, str) and len(registrar_handle) >= 16:
+            registrar_handle = registrar_handle[:16]
         return {
             "registrar_handle": registrar_handle,
             "registrar_name": self._get_registrar_name_from_handle(registrar_handle),
             "registration_date": self._normalize_date(rdap_info.get('registration_date')),
             "last_updated": self._normalize_date(rdap_info.get("last_changed_date")),
             "expiration_date": self._normalize_date(rdap_info.get("expiration_date")),
+            "age_days": self._get_age(rdap_info.get("registration_date")),
             "registrar_country": self._get_registrar_country(rdap_info, "rdap"),
             "status_flags": self._normalize_status_list(rdap_info.get("status")),
             "dnssec": rdap_info.get("dnssec")
@@ -200,9 +210,10 @@ class RDAPService:
         return {
             "registrar_handle": registrar_handle,
             "registrar_name": self._get_registrar_name_from_handle(registrar_handle),
-            "registration_date": self._normalize_date(whois_info.get("creation_date")),
-            "last_updated": self._normalize_date(whois_info.get("updated_date")),
-            "expiration_date": self._normalize_date(whois_info.get("expiration_date")),
+            "registration_date": self._normalize_date(whois_info.get("created")),
+            "last_updated": self._normalize_date(whois_info.get("updated")),
+            "expiration_date": self._normalize_date(whois_info.get("expires")),
+            "age_days": self._get_age(whois_info.get("created")),
             "registrar_country": self._get_registrar_country(whois_info, "whois"),
             "status_flags": self._normalize_status_list(whois_info.get("status")),
             "dnssec": "true" if whois_info.get("dnssec") == "signed" else "false",
@@ -229,19 +240,24 @@ class RDAPService:
                 registrar = entities.get("registrar")
                 if not registrar:
                     return None
+                handle = registrar[0].get("handle")
+                if handle:
+                    return handle if handle != "NOT APPLICABLE" else None
                 name = registrar[0].get("name")
                 if name:
                     reg = self.REGISTRARS_BY_NAME.get(normalize_registrar_name(name))
                     if reg:
-                        return reg[0].get("iana_id")
-                return registrar[0].get("handle")
+                        handle = reg[0].get("iana_id")
+                        return handle if handle != "NOT APPLICABLE" else None
+                return None
         elif type == "whois":
             reg_name = info.get("registrar")
             if reg_name:
                 normalized = normalize_registrar_name(reg_name)
                 reg = self.REGISTRARS_BY_NAME.get(normalized)
                 if reg:
-                    return reg[0].get("iana_id")
+                    handle = reg[0].get("registrar_iana_id")
+                    return handle if handle != "NOT APPLICABLE" else None
 
     # name is pretty self-explanatory
     def _get_registrar_name_from_handle(self, handle):
@@ -249,9 +265,19 @@ class RDAPService:
             return None
         reg = self.REGISTRARS_BY_ID.get(handle)
         if reg:
-            return normalize_registrar_name(reg.get("name"))
+            # maybe the names shouldn't really be normalized here.
+            # In theory, since they all come from the same source
+            # (i.e., the registrars.csv file), they should always
+            # look the same, and they're never used in any other
+            # operation that would require them to be normalized.
+            #return normalize_registrar_name(reg.get("name"))
+
+            # Returning the non-normalized name gives better readability.
+            return reg.get("name")
         return None
 
+    # TODO: for some reason, there are items in the database that have the same registrar and IANA handle,
+    # but some have the country info available and others don't. Investigate why...
     def _get_registrar_country(self, info, type):
         if type == "rdap":
             # get from entities field
@@ -268,12 +294,17 @@ class RDAPService:
                     if country:
                         return coco.convert(names=[country], to="ISO2", not_found=None)
                 # if it doesn't, try retrieving a handle and reference ICANN list
+                # TODO: have this be done first and also based on the registrar handle, not name...
                 else:
                     iana_id = registrar[0].get("handle")
                     if iana_id:
                         reg = self.REGISTRARS_BY_ID.get(iana_id)
                         if reg:
-                            return reg.get("country")
+                            countryname = reg.get("country")
+                            if isinstance(countryname, str):
+                                return countryname
+                            else:
+                                return None
         elif type == "whois":
             # get directly from the "country" record
             country = info.get("country")
@@ -281,11 +312,16 @@ class RDAPService:
                 return coco.convert(names=[country], to="ISO2", not_found=None)
 
             # try retrieving based on the registrar name
+            # TODO: have this be done first and also based on the registrar handle, not name...
             reg_name = info.get("registrar")
             normalized = normalize_registrar_name(reg_name)
             reg = self.REGISTRARS_BY_NAME.get(normalized)
             if reg:
-                return reg[0].get("country")
+                countryname = reg[0].get("country")
+                if isinstance(countryname, str):
+                    return countryname
+                else:
+                    return None
 
 
     ########################
@@ -325,4 +361,16 @@ class RDAPService:
             if isinstance(date, list):
                 date = date[0]
             return date.strftime("%Y-%m-%d")
+        return None
+
+    def _get_age(self, registration_date):
+        if registration_date:
+            try:
+                # get the difference between now and the registration date,
+                # offset to registration_date's timezone
+                diff = dt.now(registration_date.tzinfo) - registration_date
+                age = diff.days
+                return int(age)
+            except:
+                return None
         return None

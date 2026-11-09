@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Date, ForeignKey, String, Integer, UniqueConstraint, Index
+from sqlalchemy import Boolean, Date, Float, ForeignKey, String, Integer, UniqueConstraint, Index
 from sqlalchemy.orm import mapped_column, Mapped, relationship
 from asdec.core.db import Base
 from pydantic import BaseModel as PydanticBase
@@ -19,6 +19,7 @@ class RegistrationFeatures(Base):
     registration_date: Mapped[Date] = mapped_column(Date(), nullable=True)
     last_updated: Mapped[Date] = mapped_column(Date(), nullable=True)
     expiration_date: Mapped[Date] = mapped_column(Date(), nullable=True)
+    age_days: Mapped[Integer] = mapped_column(Integer(), nullable=True)
     registrar_country: Mapped[String] = mapped_column(String(length=5), nullable=True)
     dnssec: Mapped[Boolean] = mapped_column(Boolean(), nullable=True)
     status_flags: Mapped[list["RegistrationStatusFlags"]] = relationship(
@@ -39,7 +40,7 @@ class RegistrationStatusFlags(Base):
     )
 
     domain: Mapped[int] = mapped_column(ForeignKey("registration.domain_id", on_delete="CASCADE"), primary_key=True)
-    flag: Mapped[String] = mapped_column(String(length=64), primary_key=True)
+    flag: Mapped[String] = mapped_column(String(length=128), primary_key=True)
     registration: Mapped["RegistrationFeatures"] = relationship(
         back_populates="status_flags",
     )
@@ -56,6 +57,7 @@ class RegistrationFeaturesCreate(PydanticBase):
     registration_date: date | None
     last_updated: date | None
     expiration_date: date | None
+    age_days: int | None
     registrar_country: str | None
     dnssec: bool | None
     status_flags: list[RegistrationStatusFlagsCreate] | None
