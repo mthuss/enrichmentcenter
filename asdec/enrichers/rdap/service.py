@@ -124,6 +124,9 @@ class RDAPService:
                 if rdap_info and all(v is not None for v in rdap_info.values()):
                     return rdap_info
             except Exception as e:
+                # Early exit if RDAP responds and says that the domain does not exist.
+                if isinstance(e, ResourceDoesNotExist):
+                    raise EnrichmentException(EnrichmentError.NOT_FOUND)
                 # logger.info(f"[{type(e)}] RDAP Exception has occurred for {domain}!!!! Exception: {e}")
                 exceptions["rdap"] = e
                 rdap_info = {}
@@ -138,6 +141,11 @@ class RDAPService:
             # logger.info(f"[{type(e)}] WHOIS Exception has occurred for {domain}!!!! Exception: {e}")
             exceptions["whois"] = e
             whois_info = {}
+
+        # whois might return a response with no data at all for domains that don't exist.
+        # Here, an emtpy "domain_name" field is being treated as an indicator of that.
+        if not rdap_info and not whois_info.get("domain_name"):
+            raise EnrichmentException(EnrichmentError.NOT_FOUND)
 
         # REVISE: handle <socket.gaierror> exceptions for WHOIS
         # In case the domain had no supported RDAP server and whois did not return anything:
@@ -157,9 +165,9 @@ class RDAPService:
         # Here, we assess what happened and convert it to the EnrichmentError type for ease of use.
         if rdap_supported and not rdap_info and not whois_info:
             logger.info(f"No RDAP or WHOIS data for {domain}!!!!")
-            # If it was reported as not existing in RDAP and the WHOIS server timed out, there's a good chance
-            # the WHOIS server has been deprecated and, as such, is no longer responding. Treat this as a NOT_FOUND.
-            if isinstance(exceptions["rdap"], ResourceDoesNotExist) and isinstance(exceptions["whois"], (TimeoutError, socket.gaierror)):
+            # If RDAP DID respond and it responded that the resource does not exist, then the resource is already considered non-existant, regardless of whois
+            # This is already treated above, but is here as a guarantee
+            if isinstance(exceptions["rdap"], ResourceDoesNotExist):
                 raise EnrichmentException(EnrichmentError.NOT_FOUND)
             if isinstance(exceptions["rdap"], RateLimitedError) and (isinstance(exceptions["whois"], (QueryError,TimeoutError, socket.gaierror))):
                 raise EnrichmentException(EnrichmentError.RATE_LIMITED)
@@ -202,7 +210,7 @@ class RDAPService:
 
     # try to get registration date from whois as fallback
     async def _from_whois(self, domain):
-        _, whois_info = await asyncwhois.aio_whois(domain)
+        _, whois_info = await asyncwhois.aio_whois(domain, timeout=20)
             # print(json.dumps(whois_info, indent=4, default=str))
         registrar_handle = self._get_registrar(whois_info, "whois")
         if isinstance(registrar_handle, str) and len(registrar_handle) >= 16:
@@ -276,8 +284,6 @@ class RDAPService:
             return reg.get("name")
         return None
 
-    # TODO: for some reason, there are items in the database that have the same registrar and IANA handle,
-    # but some have the country info available and others don't. Investigate why...
     def _get_registrar_country(self, info, type):
         if type == "rdap":
             # get from entities field
@@ -287,32 +293,42 @@ class RDAPService:
                 if not registrar:
                     return None
 
+                # try retrieving a handle and reference ICANN list first, as this is technically more correct if available
+                iana_id = registrar[0].get("handle")
+                if iana_id:
+                    reg = self.REGISTRARS_BY_ID.get(iana_id)
+                    if reg:
+                        countryname = reg.get("country")
+                        if isinstance(countryname, str):
+                            return countryname
+                        else:
+                            return None
+
                 address = registrar[0].get("address")
                 # if it has an "address" field, try retrieving country directly
                 if address:
                     country = address.get("country")
                     if country:
                         return coco.convert(names=[country], to="ISO2", not_found=None)
-                # if it doesn't, try retrieving a handle and reference ICANN list
-                # TODO: have this be done first and also based on the registrar handle, not name...
-                else:
-                    iana_id = registrar[0].get("handle")
-                    if iana_id:
-                        reg = self.REGISTRARS_BY_ID.get(iana_id)
-                        if reg:
-                            countryname = reg.get("country")
-                            if isinstance(countryname, str):
-                                return countryname
-                            else:
-                                return None
+            return None
         elif type == "whois":
+            # try retrieving the country from the registrar IANA ID first
+            iana_id = info.get("registrar_iana_id")
+            if iana_id:
+                reg = self.REGISTRARS_BY_ID.get(iana_id)
+                if reg:
+                    countryname = reg[0].get("country")
+                    if countryname:
+                        if isinstance(countryname, str):
+                            return countryname
+                        else:
+                            return None
             # get directly from the "country" record
             country = info.get("country")
             if country:
                 return coco.convert(names=[country], to="ISO2", not_found=None)
 
             # try retrieving based on the registrar name
-            # TODO: have this be done first and also based on the registrar handle, not name...
             reg_name = info.get("registrar")
             normalized = normalize_registrar_name(reg_name)
             reg = self.REGISTRARS_BY_NAME.get(normalized)
@@ -322,6 +338,7 @@ class RDAPService:
                     return countryname
                 else:
                     return None
+            return None
 
 
     ########################
