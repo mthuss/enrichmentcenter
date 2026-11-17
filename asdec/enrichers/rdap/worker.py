@@ -57,7 +57,7 @@ class RDAPEnricher(Enricher):
                 successful_ids.append(r.job_id)
                 if r.extra_data:
                     if "equivalent_jobs" in r.extra_data.keys():
-                        successful_ids.extend([i for i in r.extra_data["equivalent_jobs"]])
+                        successful_ids.extend([i.id for i in r.extra_data["equivalent_jobs"]])
 
             await job_service.mark_done_batch(successful_ids, self.enrichment_type)
 
@@ -69,7 +69,7 @@ class RDAPEnricher(Enricher):
                     errored_ids[e.error].append(e.job_id)
                 if e.extra_data:
                     if "equivalent_jobs" in e.extra_data.keys():
-                        errored_ids[e.error].extend([i for i in e.extra_data["equivalent_jobs"]])
+                        errored_ids[e.error].extend([i.id for i in e.extra_data["equivalent_jobs"]])
 
             for key in errored_ids.keys():
                 errored_of_type = errored_ids[key]
@@ -126,10 +126,11 @@ class RDAPEnricher(Enricher):
             seen_domains = {}
             jobs = []
             for item in batch:
-                domain_name = tldextract.extract(item.domain_name).top_domain_under_public_suffix
+                # Extract the registrable domain name and lowercase it.
+                domain_name = tldextract.extract(item.domain_name).top_domain_under_public_suffix.lower()
                 # Make sure the simplified domains are unique
                 if domain_name in seen_domains.keys():
-                    seen_domains[domain_name].extra_data["equivalent_jobs"].append(item.job.id)
+                    seen_domains[domain_name].extra_data["equivalent_jobs"].append(item.job)
                     duplicate_jobs += 1
                 else:
                     item.domain_name = domain_name

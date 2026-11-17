@@ -43,6 +43,16 @@ class EnrichmentService:
 
         await self._repo_.mark_done_batch(job_ids, enrichment_period)
 
+#    async def mark_done_batch_with_subdomains(self, jobs: Sequence[EnrichmentJob], enrichment_type: EnrichmentType):
+#
+#        enrichment_period = ENRICHMENT_INTERVALS[enrichment_type]
+#
+#        if not jobs:
+#            return
+#
+#        await self._repo_.mark_done_batch_with_subdomains(jobs, enrichment_period)
+
+
 #    async def schedule_next_enrichment(self, jobs: Sequence[EnrichmentJob], next_enrichment_dates)
 #        if next_enrichment_dates == None:
 #            next_enrichment_dates = []

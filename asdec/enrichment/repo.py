@@ -155,6 +155,14 @@ class EnrichmentJobRepo:
         await self._session_.commit()
         logger.info("[erichment mark_done] After commit")
 
+#    async def mark_done_batch_with_subdomains(self, jobs: Sequence[EnrichmentJob], enrichment_interval):
+#        for batch in batched(jobs, 16384):
+#            stmt = (
+#                update(EnrichmentJob)
+#                .where(EnrichmentJob.domain_name.ilike(f".{}"))
+#            )
+#        pass
+
 #    async def schedule_enrichment(self, job_ids, next_enrichment_dates):
 #        for batch in job_ids:
 #            stmt = (update(EnrichmentJob))

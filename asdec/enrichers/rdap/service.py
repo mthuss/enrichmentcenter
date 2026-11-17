@@ -41,29 +41,35 @@ class RDAPService:
     # async def test(self, domain):
         # return await self.registration_info(domain)
 
+    # Gets the registration from self.registration_info info, formats it into a RegistrationFeaturesCreate object and returns the list of associated status flags. 
+    # Used by the worker
     async def enrich_domain(self, job_info: JobInfo):
         info = {}
         try:
             info = await self.registration_info(job_info.domain_name, job_info.extra_data["rdap_supported"])
         except EnrichmentException as e:
             if e.code == EnrichmentError.NOT_FOUND or e.code == EnrichmentError.UNSUPPORTED:
-                return RegistrationFeaturesCreate(domain_id=job_info.job.domain,available=False,registrar_handle=None,registrar_name=None,registration_date=None,last_updated=None,expiration_date=None,age_days=None,registrar_country=None,dnssec=None,status_flags=None,all_features=False)
+                return RegistrationFeaturesCreate(available=False, registrable_domain=job_info.domain_name, registrar_handle=None,registrar_name=None,registration_date=None,last_updated=None,expiration_date=None,age_days=None,registrar_country=None,dnssec=None,status_flags=None,all_features=False)
             else:
                 raise e
         
         if not info:
             return None
 
-        if "status_flags" in info.keys():
-            flags = [ RegistrationStatusFlagsCreate(domain=job_info.job.domain, flag=f) for f in info["status_flags"] ]
-        else:
-            flags = None
+        # TODO: this needs to be returned separately from the RegistrationFeatures object
+        # and be added in a list with the format status_flags[registrable_domain] = list_of_status_flags.
+        # This is to change the item creation pipeline to adding the RegistrationFeatures objects into
+        # the Database, returning the created id (PK) and the registrable_domain string. After inserting those,
+        # the status_flags list created before will now be used to associate the returned pairs of 
+        # (regisration_id, registrable_domain) with their respective status flags, creating
+        # RegistrationStatusFlagsCreate items with the enrichment_id and then finally adding
+        # them to the database.
 
         all_features = all(v is not None for v in info.values())
 
         return RegistrationFeaturesCreate(
-            domain_id=job_info.job.domain, 
             available=True,
+            registrable_domain = job_info.domain_name,
             registrar_handle=info["registrar_handle"],
             registrar_name=info["registrar_name"],
             registration_date=info["registration_date"],
@@ -72,15 +78,34 @@ class RDAPService:
             age_days=info["age_days"],
             registrar_country=info["registrar_country"],
             dnssec=info["dnssec"],
-            status_flags=flags,
+            status_flags=info["status_flags"],
             all_features=all_features
         )
 
     async def add_batch_to_db(self, results: Sequence[EnrichmentResults]):
+        equivalent = {}
         features: Sequence[RegistrationFeaturesCreate] = [r.results for r in results]
+
         async with self._db.getSession() as session:
             repo = RDAPRepo(session)
-            return await repo.bulk_create(features, 3000)
+            added, rowcount = await repo.bulk_create(features, 3000)
+
+            # Create a mapping between the registered domain name and its correspondent registration_id
+            # NOTE: this solution relies on the assumption that all domains that were submitted for insertion
+            # will be returned by the bulk_create function. Currently, this is true due to the fact that conflicts
+            # always generate updates. Still, pay attention to this whenever making changes to bulk_create.
+            added_dict = dict(added)
+            domain_registration_rel_objs = []
+            for r in results:
+                registration_id = added_dict[r.results.registrable_domain]
+                domain_registration_rel_objs.append({"registration_id": registration_id, "domain_id": r.domain_id})
+                if r.extra_data:
+                    eq_jobs = r.extra_data.get("equivalent_jobs")
+                    if eq_jobs:
+                        domain_registration_rel_objs.extend([{"registration_id": registration_id, "domain_id": j.domain} for j in eq_jobs])
+
+            await repo.associate_domains_to_registration_data(values=domain_registration_rel_objs, batch_size=8196)
+            return rowcount
 
     def get_rdap_server(self, domain):
         tld = domain.rsplit(".", 1)[-1].lower()
